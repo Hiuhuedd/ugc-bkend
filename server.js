@@ -17,7 +17,7 @@ const reddit = new snoowrap({
 // Middleware
 app.use(express.json());
 app.use(cors({
-  origin: 'http://localhost:3001',
+  origin: 'https://reddit-user-gen-content.netlify.app',
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type'],
 }));
