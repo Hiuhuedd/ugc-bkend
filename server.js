@@ -25,27 +25,8 @@ const r = new snoowrap({
 const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
 const GOOGLE_CX = process.env.GOOGLE_CX;
 
-// Determine if running on Render
-const isRender = process.env.RENDER === 'true';
-
-// Puppeteer launch options based on environment
-const puppeteerLaunchOptions = {
-  headless: true,
-  ...(isRender
-    ? {
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--no-first-run',
-          '--no-zygote',
-          '--single-process',
-          '--disable-gpu',
-        ],
-      }
-    : {}),
-};
+// Browserless setup
+const BROWSERLESS_TOKEN = process.env.BROWSERLESS_TOKEN;
 
 // Helper function to auto-scroll pages (for Quora and Twitter)
 async function autoScroll(page) {
@@ -175,7 +156,7 @@ app.get('/twitter/search', async (req, res) => {
   }
 
   try {
-    const searchQuery = `site:twitter.com ${query}`; // Broader query as per previous fix
+    const searchQuery = `site:twitter.com ${query}`;
     const url = `https://www.googleapis.com/customsearch/v1?key=${GOOGLE_API_KEY}&cx=${GOOGLE_CX}&q=${encodeURIComponent(searchQuery)}`;
     console.log('Fetching Twitter search results from Google API:', url);
 
@@ -210,7 +191,7 @@ app.get('/twitter/search', async (req, res) => {
   }
 });
 
-// Quora Thread Endpoint (Using Puppeteer)
+// Quora Thread Endpoint (Using Browserless)
 app.get('/quora/thread', async (req, res) => {
   const url = req.query.url;
   if (!url) {
@@ -218,7 +199,9 @@ app.get('/quora/thread', async (req, res) => {
   }
 
   try {
-    const browser = await puppeteer.launch(puppeteerLaunchOptions);
+    const browser = await puppeteer.connect({
+      browserWSEndpoint: `wss://chrome.browserless.io?token=${BROWSERLESS_TOKEN}`,
+    });
     const page = await browser.newPage();
     await page.goto(url, { waitUntil: 'networkidle2' });
 
@@ -253,12 +236,12 @@ app.get('/quora/thread', async (req, res) => {
     await browser.close();
     res.json(thread);
   } catch (error) {
-    console.error('Quora thread error:', error);
+    console.error('Quora thread error (Browserless):', error);
     res.status(500).json({ error: 'Failed to fetch thread details from Quora' });
   }
 });
 
-// Twitter Thread Endpoint (Using Puppeteer)
+// Twitter Thread Endpoint (Using Browserless)
 app.get('/twitter/thread', async (req, res) => {
   const url = req.query.url;
   if (!url) {
@@ -266,31 +249,23 @@ app.get('/twitter/thread', async (req, res) => {
   }
 
   try {
-    const browser = await puppeteer.launch(puppeteerLaunchOptions);
+    const browser = await puppeteer.connect({
+      browserWSEndpoint: `wss://chrome.browserless.io?token=${BROWSERLESS_TOKEN}`,
+    });
     const page = await browser.newPage();
 
-    // Set a user agent to avoid being blocked by Twitter
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
-
-    // Navigate to the tweet URL
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 30000 });
-
-    // Scroll to load replies
     await autoScroll(page);
-
-    // Wait for the tweet content to load (Twitter's dynamic loading)
     await page.waitForSelector('article[data-testid="tweet"]', { timeout: 10000 });
 
-    // Extract tweet details and replies
     const thread = await page.evaluate(() => {
-      // Main tweet
       const tweetElement = document.querySelector('article[data-testid="tweet"]');
       const usernameElement = tweetElement?.querySelector('div[data-testid="User-Name"] a');
       const username = usernameElement?.innerText || 'Unknown';
       const tweetTextElement = tweetElement?.querySelector('div[data-testid="tweetText"]');
       const tweetText = tweetTextElement?.innerText || '';
 
-      // Replies
       const replies = [];
       const replyElements = document.querySelectorAll('article[data-testid="tweet"]:not(:first-of-type)');
       replyElements.forEach((element) => {
@@ -318,7 +293,7 @@ app.get('/twitter/thread', async (req, res) => {
     await browser.close();
     res.json(thread);
   } catch (error) {
-    console.error('Twitter thread error:', error);
+    console.error('Twitter thread error (Browserless):', error);
     res.status(500).json({ error: 'Failed to fetch thread details from Twitter' });
   }
 });
