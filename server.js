@@ -9,9 +9,13 @@ const app = express();
 const port = process.env.PORT || 4000;
 
 // Middleware
-app.use(cors());
 app.use(express.json());
-
+// CORS configuration
+app.use(cors({
+    origin: 'https://reddit-user-gen-content.netlify.app', // Allow only your Netlify frontend
+    methods: ['GET', 'POST'], // Allow only GET and POST requests
+    allowedHeaders: ['Content-Type'], // Allow specific headers
+  }));
 // Reddit API setup
 const r = new snoowrap({
   userAgent: 'ugc-app/0.1 by your-username',
