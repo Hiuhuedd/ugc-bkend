@@ -33,7 +33,6 @@ const puppeteerLaunchOptions = {
   headless: true,
   ...(isRender
     ? {
-        executablePath: '/usr/bin/google-chrome',
         args: [
           '--no-sandbox',
           '--disable-setuid-sandbox',
@@ -168,7 +167,7 @@ app.get('/quora/search', async (req, res) => {
   }
 });
 
-// Twitter Search Endpoint (Using Puppeteer instead of Google Search API)
+// Twitter Search Endpoint (Using Google Search API)
 app.get('/twitter/search', async (req, res) => {
   const query = req.query.query;
   if (!query) {
@@ -176,57 +175,37 @@ app.get('/twitter/search', async (req, res) => {
   }
 
   try {
-    const browser = await puppeteer.launch(puppeteerLaunchOptions);
-    const page = await browser.newPage();
+    const searchQuery = `site:twitter.com ${query}`; // Broader query as per previous fix
+    const url = `https://www.googleapis.com/customsearch/v1?key=${GOOGLE_API_KEY}&cx=${GOOGLE_CX}&q=${encodeURIComponent(searchQuery)}`;
+    console.log('Fetching Twitter search results from Google API:', url);
 
-    // Set a user agent to avoid being blocked by Twitter
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+    const response = await axios.get(url);
+    if (response.status !== 200) {
+      throw new Error(`Google API request failed with status ${response.status}: ${response.statusText}`);
+    }
 
-    // Navigate to Twitter search page
-    const searchUrl = `https://twitter.com/search?q=${encodeURIComponent(query)}&src=typed_query`;
-    console.log('Fetching Twitter search results from:', searchUrl);
-    await page.goto(searchUrl, { waitUntil: 'networkidle2', timeout: 30000 });
+    const items = response.data.items || [];
+    const results = items.map(item => {
+      const urlMatch = item.link.match(/twitter\.com\/([^/]+)\/status/);
+      const username = urlMatch ? urlMatch[1] : 'Unknown';
+      const tweetIdMatch = item.link.match(/status\/(\d+)/);
+      const tweetId = tweetIdMatch ? tweetIdMatch[1] : null;
 
-    // Scroll to load more tweets
-    await autoScroll(page);
-
-    // Wait for tweets to load
-    await page.waitForSelector('article[data-testid="tweet"]', { timeout: 10000 });
-
-    // Extract tweets
-    const results = await page.evaluate(() => {
-      const tweets = [];
-      const tweetElements = document.querySelectorAll('article[data-testid="tweet"]');
-      tweetElements.forEach((element) => {
-        const usernameElement = element.querySelector('div[data-testid="User-Name"] a');
-        const username = usernameElement?.innerText || 'Unknown';
-        const tweetTextElement = element.querySelector('div[data-testid="tweetText"]');
-        const tweetText = tweetTextElement?.innerText || '';
-        const linkElement = element.querySelector('a[href*="/status/"]');
-        const tweetUrl = linkElement ? `https://twitter.com${linkElement.getAttribute('href')}` : '';
-        const tweetIdMatch = tweetUrl.match(/status\/(\d+)/);
-        const tweetId = tweetIdMatch ? tweetIdMatch[1] : null;
-
-        if (tweetText && tweetUrl) {
-          tweets.push({
-            tweet_id: tweetId,
-            title: `${tweetText.slice(0, 50)}... - @${username}`, // Truncated for title
-            url: tweetUrl,
-            snippet: tweetText,
-            username: username,
-          });
-        }
-      });
-      return tweets.slice(0, 10); // Limit to 10 results
+      return {
+        tweet_id: tweetId,
+        title: item.title,
+        url: item.link,
+        snippet: item.snippet || '',
+        username: username,
+      };
     });
 
-    await browser.close();
     res.json(results);
   } catch (error) {
-    console.error('Twitter search error (Puppeteer):', error);
+    console.error('Twitter search error (Google API):', error.response ? error.response.data : error.message);
     res.status(500).json({ 
-      error: 'Failed to fetch search results from Twitter via Puppeteer', 
-      details: error.message 
+      error: 'Failed to fetch search results from Twitter via Google API', 
+      details: error.response ? error.response.data : error.message 
     });
   }
 });
