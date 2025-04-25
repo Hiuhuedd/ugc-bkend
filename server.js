@@ -12,7 +12,7 @@ const port = process.env.PORT || 4000;
 // Middleware
 app.use(express.json());
 app.use(cors({
-    origin: 'http://localhost:3000',
+    origin: 'https://reddit-user-gen-content.netlify.app',
     methods: ['GET', 'POST'],
     allowedHeaders: ['Content-Type'],
 }));
