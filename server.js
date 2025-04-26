@@ -12,7 +12,7 @@ const port = process.env.PORT || 4000;
 // Middleware
 app.use(express.json());
 app.use(cors({
-    origin: 'https://reddit-user-gen-content.netlify.app',
+    origin: ['http://localhost:3000', 'https://reddit-user-gen-content.netlify.app'],
     methods: ['GET', 'POST'],
     allowedHeaders: ['Content-Type'],
 }));
@@ -255,7 +255,7 @@ app.get('/quora/thread', async (req, res) => {
         console.error('Quora thread error (Browserless):', error.message, 'URL:', url);
         if (error.message.includes('429')) {
             res.status(429).json({
-                error: 'Srvice rebuilding... ',
+                error: 'Service rebuilding... ',
                 details: 'try again shortly.',
             });
         } else {
@@ -297,18 +297,21 @@ app.get('/news/search', async (req, res) => {
       'cnn',
       'nbc-news',
       'yahoo-finance',
+      'reuters',
+      'business-insider',
+      'the-wall-street-journal',
     ];
 
     if (source && validSources.includes(source)) {
-      // Source-specific search (e.g., bbc-news)
+      // Source-specific search
       url = `https://newsapi.org/v2/top-headlines?sources=${source}&q=${encodeURIComponent(
         query
       )}&apiKey=${NEWS_API_KEY}`;
     } else {
-      // Search across all specified sources
-      url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(
+      // General search across all available sources
+      url = `https://newsapi.org/v2/everything?sources=${validSources}&q=${encodeURIComponent(
         query
-      )}&sources=${validSources.join(',')}&from=2025-03-25&sortBy=publishedAt&apiKey=${NEWS_API_KEY}`;
+      )}&from=2025-04-01&sortBy=publishedAt&apiKey=${NEWS_API_KEY}`;
     }
 
     console.log('NewsAPI request URL:', url); // Debug the URL
@@ -318,13 +321,13 @@ app.get('/news/search', async (req, res) => {
     }
 
     const articles = response.data.articles || [];
-    const results = articles.slice(0, 10).map((article) => ({
+    const results = articles.slice(0, 20).map((article) => ({
       title: article.title || 'No title',
       author: article.author || article.source.name || 'Unknown',
       published_date: article.publishedAt || null,
       thumbnail: article.urlToImage || null,
       url: article.url || null,
-      snippet: article.content || 'No content available',
+      snippet: article.description || article.content || 'No description available',
       source: article.source.name || 'Unknown',
     }));
 
@@ -337,6 +340,7 @@ app.get('/news/search', async (req, res) => {
     });
   }
 });
+
 // Start the server
 app.listen(port, () => {
     console.log(`Server running on http://localhost:${port}`);
