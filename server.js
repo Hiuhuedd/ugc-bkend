@@ -92,6 +92,7 @@ async function connectWithRetry(maxRetries = 3, retryDelay = 2000) {
 }
 
 // Reddit Search Endpoint
+// Reddit Search Endpoint (unchanged)
 app.get('/search', async (req, res) => {
     const query = req.query.query;
     if (!query) {
@@ -123,22 +124,31 @@ app.get('/search', async (req, res) => {
     }
 });
 
-// Reddit Thread Endpoint
+// ... (previous imports and middleware setup remain unchanged) ...
+
+// Reddit Thread Endpoint (updated)
 app.get('/thread', async (req, res) => {
     const postId = req.query.id;
+    console.log('Received postId:', postId); // Debug log
+
     if (!postId) {
         return res.status(400).json({ error: 'Post ID is required' });
     }
 
-    try {
-        const sixMonthsAgo = 1729814400; // Approx. Oct 25, 2024
-        const post = await r.getSubmission(postId).fetch();
-        if (post.created_utc < sixMonthsAgo) {
-            return res.status(404).json({ error: 'Post is older than 6 months' });
+    // Validate and extract postId if it's a URL
+    let submissionId = postId;
+    if (postId.includes('https://')) {
+        // Extract submission ID from a Reddit URL (e.g., /comments/t3_abc123)
+        const idMatch = postId.match(/\/comments\/(t3_[a-zA-Z0-9]+)/);
+        submissionId = idMatch ? idMatch[1] : null;
+        if (!submissionId) {
+            return res.status(400).json({ error: 'Invalid Reddit URL or post ID' });
         }
+    }
 
-        const comments = await post.comments.fetchMore({ amount: 50 });
-        const filteredComments = comments.filter(comment => comment.created_utc >= sixMonthsAgo);
+    try {
+        const post = await r.getSubmission(submissionId).fetch();
+        const comments = await post.comments.fetchMore({ amount: 10 });
 
         const thread = {
             post_id: post.id,
@@ -151,21 +161,31 @@ app.get('/thread', async (req, res) => {
             thumbnail: post.thumbnail && post.thumbnail !== 'self' && post.thumbnail !== 'default' ? post.thumbnail : null,
             url: post.url,
             is_image: post.url.includes('.jpg') || post.url.includes('.png') || post.url.includes('.jpeg'),
-            comments: filteredComments.slice(0, 10).map(comment => ({
+            comments: comments.map(comment => ({
                 id: comment.id,
                 author: comment.author.name,
                 score: comment.score,
                 created_utc: comment.created_utc,
                 body: comment.body,
-                permalink: `https://www.reddit.com${comment.permalink}`,
             })),
         };
         res.json(thread);
     } catch (error) {
-        console.error('Reddit thread error:', error);
-        res.status(500).json({ error: 'Failed to fetch thread details from Reddit' });
+        console.error('Reddit thread error:', {
+            message: error.message,
+            stack: error.stack,
+            cause: error.cause,
+            postId: postId,
+            submissionId: submissionId,
+        });
+        res.status(500).json({
+            error: 'Failed to fetch thread details from Reddit',
+            details: error.message,
+        });
     }
 });
+
+// ... (rest of the code, including Quora and News endpoints, remains unchanged) ...
 
 // Quora Search Endpoint
 app.get('/quora/search', async (req, res) => {
@@ -280,65 +300,75 @@ const NEWS_API_KEY = process.env.NEWS_API_KEY;
 // Log the API key to verify it's loaded
 console.log('NEWS_API_KEY:', process.env.NEWS_API_KEY);
 
+// Helper function to calculate the "from" date (30 days back from today)
+function getFromDate() {
+    const today = new Date();
+    const fromDate = new Date(today);
+    fromDate.setDate(today.getDate() - 29); // 30 days back
+    return fromDate.toISOString().split('T')[0]; // Format as YYYY-MM-DD
+}
+
 // News Search Endpoint
 app.get('/news/search', async (req, res) => {
-  const query = req.query.query;
-  const source = req.query.source; // Optional: specific news source
-  if (!query) {
-    return res.status(400).json({ error: 'Query parameter is required' });
-  }
-
-  try {
-    let url;
-    const validSources = [
-      'bbc-news',
-      'forbes',
-      'bloomberg',
-      'cnn',
-      'nbc-news',
-      'yahoo-finance',
-      'reuters',
-      'business-insider',
-      'the-wall-street-journal',
-    ];
-
-    if (source && validSources.includes(source)) {
-      // Source-specific search
-      url = `https://newsapi.org/v2/top-headlines?sources=${source}&q=${encodeURIComponent(
-        query
-      )}&apiKey=${NEWS_API_KEY}`;
-    } else {
-      // General search across all available sources
-      url = `https://newsapi.org/v2/everything?sources=${validSources}&q=${encodeURIComponent(
-        query
-      )}&from=2025-04-01&sortBy=publishedAt&apiKey=${NEWS_API_KEY}`;
+    const query = req.query.query;
+    const source = req.query.source; // Optional: specific news source
+    if (!query) {
+        return res.status(400).json({ error: 'Query parameter is required' });
     }
 
-    console.log('NewsAPI request URL:', url); // Debug the URL
-    const response = await axios.get(url);
-    if (response.status !== 200) {
-      throw new Error(`NewsAPI request failed with status ${response.status}`);
+    try {
+        let url;
+        const validSources = [
+            'bbc-news',
+            'forbes',
+            'bloomberg',
+            'cnn',
+            'nbc-news',
+            'yahoo-finance',
+            'reuters',
+            'business-insider',
+            'the-wall-street-journal',
+        ];
+
+        // Calculate the "from" date dynamically
+        const fromDate = getFromDate();
+
+        if (source && validSources.includes(source)) {
+            // Source-specific search
+            url = `https://newsapi.org/v2/everything?country=us&q=${encodeURIComponent(
+                query
+            )}&apiKey=${NEWS_API_KEY}`;
+        } else {
+            // General search across all available sources
+            url = `https://newsapi.org/v2/top-headlines?q=${encodeURIComponent(
+                query
+            )}&from=${fromDate}&sortBy=publishedAt&apiKey=${NEWS_API_KEY}`;
+        }
+
+        console.log('NewsAPI request URL:', url); // Debug the URL
+        const response = await axios.get(url);
+        if (response.status !== 200) {
+            throw new Error(`NewsAPI request failed with status ${response.status}`);
+        }
+
+        const articles = response.data.articles || [];
+        const results = articles.map((article) => ({
+            title: article.title || 'No title',
+            author: article.author || article.source.name || 'Unknown',
+            published_date: article.publishedAt || null,
+            thumbnail: article.urlToImage || null,
+            url: article.url || null,
+            snippet: article.description || article.content || 'No description available',
+            source: article.source.name || 'Unknown',
+        }));
+
+        res.json(results);
+        console.log('News search results:', results); // Debug the results
+    } catch (error) {
+        console.error('News search error:', error.message, error.response?.data, error.response?.status);
+        // Return an empty array if NewsAPI fails, so the app can still show Reddit and Quora results
+        res.json([]);
     }
-
-    const articles = response.data.articles || [];
-    const results = articles.slice(0, 20).map((article) => ({
-      title: article.title || 'No title',
-      author: article.author || article.source.name || 'Unknown',
-      published_date: article.publishedAt || null,
-      thumbnail: article.urlToImage || null,
-      url: article.url || null,
-      snippet: article.description || article.content || 'No description available',
-      source: article.source.name || 'Unknown',
-    }));
-
-    res.json(results);
-  } catch (error) {
-    console.error('News search error:', error.message, error.response?.data, error.response?.status);
-    res.status(500).json({
-      error: 'Failed to fetch news articles',
-      details: error.response?.data?.message || error.message,
-    });
-  }
 });
 
 // Start the server
